@@ -1,0 +1,7 @@
+﻿TENSORFLOW SERVING VERSION 2.4
+
+Downloaded from:
+https://github.com/tensorflow/serving/tree/r1.0/tensorflow_serving/apis r2.4
+https://github.com/tensorflow/tensorflow/tree/master/tensorflow/core/framework r2.4
+
+Import paths modified in order for local proto subset to compile (we don't need everything)
