@@ -4,7 +4,7 @@ using Tensorflow.Serving;
 
 namespace GrpcMigrationRepro;
 
-public interface IMyClient : IDisposable
+public interface IMyClient : IAsyncDisposable
 {
     Task<PredictResponse> PredictAsync(PredictRequest request);
 }

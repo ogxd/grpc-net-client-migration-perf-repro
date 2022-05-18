@@ -23,20 +23,11 @@ public sealed class MyClientGrpcCore : IMyClient
 
     public async Task<PredictResponse> PredictAsync(PredictRequest request)
     {
-        try
-        {
-            var response = await _client.PredictAsync(request);
-            return response;
-        }
-        catch (Exception e)
-        {
-
-        }
-
-        return null;
+        var response = await _client.PredictAsync(request);
+        return response;
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         if (_channel == null)
             return;
@@ -44,13 +35,6 @@ public sealed class MyClientGrpcCore : IMyClient
         if (_channel.State == ChannelState.Shutdown)
             return;
 
-        try
-        {
-            _channel.ShutdownAsync().Wait();
-        }
-        catch (Exception e)
-        {
-            Trace.WriteLine(e.ToString());
-        }
+        await _channel.ShutdownAsync();
     }
 }

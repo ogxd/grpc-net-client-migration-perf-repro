@@ -7,7 +7,7 @@ using Tensorflow.Serving;
 
 namespace GrpcMigrationRepro.Tests;
 
-public class LocalPredictionServer : IDisposable
+public class LocalPredictionServer : IAsyncDisposable
 {
     private readonly Server _server;
     private readonly int _port;
@@ -28,9 +28,9 @@ public class LocalPredictionServer : IDisposable
         _server.Start();
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
-        _server.ShutdownAsync().Wait();
+        await _server.ShutdownAsync();
     }
 
     internal class LocalPredictionService : PredictionService.PredictionServiceBase

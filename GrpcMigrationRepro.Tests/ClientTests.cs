@@ -7,6 +7,7 @@ using Tensorflow.Serving;
 using Xunit;
 using Xunit.Abstractions;
 using GrpcMigrationRepro.Builders;
+using System.Threading;
 
 namespace GrpcMigrationRepro.Tests;
 
@@ -22,28 +23,40 @@ public class MyClientTests
     }
 
     [Fact]
-    public void Test_Grpc_Net_Client()
+    public async Task Test_Grpc_Net_Client()
     {
-        using LocalPredictionServer server = new LocalPredictionServer(8500, Policy.NoOpAsync<PredictResponse>());
-        using MyClientGrpcNetClient client = new MyClientGrpcNetClient($"127.0.0.1:{server.Port}");
+        await using LocalPredictionServer server = new LocalPredictionServer(8500, Policy.NoOpAsync<PredictResponse>());
+        await using MyClientGrpcNetClient client = new MyClientGrpcNetClient($"127.0.0.1:{server.Port}");
 
-        TestReport report = Test(server, client, 20_000, 100_000);
+        _output.WriteLine("Warm up:");
+        TestReport report = await Test(server, client, 20_000, 100_000);
+
+        Assert.Equal(1, report.successRatio);
+
+        _output.WriteLine("Actual:");
+        report = await Test(server, client, 20_000, 100_000);
 
         Assert.Equal(1, report.successRatio);
     }
 
     [Fact]
-    public void Test_Grpc_Core()
+    public async Task Test_Grpc_Core()
     {
-        using LocalPredictionServer server = new LocalPredictionServer(8500, Policy.NoOpAsync<PredictResponse>());
-        using MyClientGrpcCore client = new MyClientGrpcCore($"127.0.0.1:{server.Port}");
+        await using LocalPredictionServer server = new LocalPredictionServer(8500, Policy.NoOpAsync<PredictResponse>());
+        await using MyClientGrpcCore client = new MyClientGrpcCore($"127.0.0.1:{server.Port}");
 
-        TestReport report = Test(server, client, 20_000, 100_000);
+        _output.WriteLine("Warm up:");
+        TestReport report = await Test(server, client, 20_000, 100_000);
+
+        Assert.Equal(1, report.successRatio);
+
+        _output.WriteLine("Actual:");
+        report = await Test(server, client, 20_000, 100_000);
 
         Assert.Equal(1, report.successRatio);
     }
 
-    private TestReport Test(
+    private async Task<TestReport> Test(
         LocalPredictionServer server,
         IMyClient client,
         int targetQps,
@@ -55,23 +68,36 @@ public class MyClientTests
 
         Stopwatch swTotal = Stopwatch.StartNew();
 
-        Task.WhenAll(Enumerable.Range(0, iterations)
+        int maxParallelCalls = 0;
+        int currentParallelCalls = 0;
+
+        await Task.WhenAll(Enumerable.Range(0, iterations)
             .Select(async i =>
             {
                 try
                 {
+                    //_output.WriteLine($"Iteration {i}. Delay: {(i * targetResponseTime).TotalMilliseconds}ms");
+
                     await Task.Delay(i * targetResponseTime);
+
+                    Interlocked.Increment(ref currentParallelCalls);
+                    if (currentParallelCalls > maxParallelCalls)
+                    {
+                        maxParallelCalls = currentParallelCalls;
+                    }
+
                     Stopwatch sw = Stopwatch.StartNew();
                     var result = await client.PredictAsync(CreateRandomRequest());
                     sw.Stop();
+                    Interlocked.Decrement(ref currentParallelCalls);
+
                     responseTimes[i] = (result == null) ? TimeSpan.Zero : sw.Elapsed;
                 }
                 catch (Exception ex)
                 {
                     _output.WriteLine("Error : " + ex);
                 }
-            }))
-            .Wait();
+            }));
 
         swTotal.Stop();
 
@@ -96,6 +122,7 @@ public class MyClientTests
         _output.WriteLine($"- 95p quantile = {report.quantile95p.TotalMilliseconds} ms");
         _output.WriteLine($"- 50p quantile = {report.quantile50p.TotalMilliseconds} ms");
         _output.WriteLine($"- Average = {report.average.TotalMilliseconds} ms");
+        _output.WriteLine($"- Max parallel calls = {maxParallelCalls}");
 
         return report;
     }

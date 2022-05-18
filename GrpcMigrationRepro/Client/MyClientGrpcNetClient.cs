@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Threading.Tasks;
 using Tensorflow.Serving;
 using Grpc.Net.Client;
+using System.Net.Http;
 
 namespace GrpcMigrationRepro;
 
@@ -17,27 +18,22 @@ public sealed class MyClientGrpcNetClient : IMyClient
 
     public MyClientGrpcNetClient(string host)
     {
-        _channel = GrpcChannel.ForAddress("http://" + host, new GrpcChannelOptions { Credentials = ChannelCredentials.Insecure });
+        _channel = GrpcChannel.ForAddress("http://" + host, new GrpcChannelOptions
+        {
+            Credentials = ChannelCredentials.Insecure,
+            HttpHandler = new SocketsHttpHandler() { EnableMultipleHttp2Connections = true },
+        });
         _client = new PredictionService.PredictionServiceClient(_channel);
         _host = host;
     }
 
     public async Task<PredictResponse> PredictAsync(PredictRequest request)
     {
-        try
-        {
-            var response = await _client.PredictAsync(request);
-            return response;
-        }
-        catch (Exception e)
-        {
-
-        }
-
-        return null;
+        var response = await _client.PredictAsync(request);
+        return response;
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         if (_channel == null)
             return;
@@ -45,13 +41,6 @@ public sealed class MyClientGrpcNetClient : IMyClient
         if (_channel.State == ConnectivityState.Shutdown)
             return;
 
-        try
-        {
-            _channel.ShutdownAsync().Wait();
-        }
-        catch (Exception e)
-        {
-            Trace.WriteLine(e.ToString());
-        }
+        await _channel.ShutdownAsync();
     }
 }
