@@ -76,8 +76,6 @@ public class MyClientTests
             {
                 try
                 {
-                    //_output.WriteLine($"Iteration {i}. Delay: {(i * targetResponseTime).TotalMilliseconds}ms");
-
                     await Task.Delay(i * targetResponseTime);
 
                     Interlocked.Increment(ref currentParallelCalls);

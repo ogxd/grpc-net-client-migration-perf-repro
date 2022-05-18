@@ -7,6 +7,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "GrpcMigrationRepro", "GrpcM
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "GrpcMigrationRepro.Tests", "GrpcMigrationRepro.Tests\GrpcMigrationRepro.Tests.csproj", "{98FCAF77-69DF-4FF2-8260-19E79882F748}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GrpcMigrationRepro.App", "GrpcMigrationRepro.App\GrpcMigrationRepro.App.csproj", "{8D6011D0-45A3-46EF-8E89-CD6863BFA2F1}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{98FCAF77-69DF-4FF2-8260-19E79882F748}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{98FCAF77-69DF-4FF2-8260-19E79882F748}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{98FCAF77-69DF-4FF2-8260-19E79882F748}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8D6011D0-45A3-46EF-8E89-CD6863BFA2F1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8D6011D0-45A3-46EF-8E89-CD6863BFA2F1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8D6011D0-45A3-46EF-8E89-CD6863BFA2F1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8D6011D0-45A3-46EF-8E89-CD6863BFA2F1}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

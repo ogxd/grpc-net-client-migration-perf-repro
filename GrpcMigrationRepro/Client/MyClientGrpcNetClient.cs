@@ -21,7 +21,6 @@ public sealed class MyClientGrpcNetClient : IMyClient
         _channel = GrpcChannel.ForAddress("http://" + host, new GrpcChannelOptions
         {
             Credentials = ChannelCredentials.Insecure,
-            HttpHandler = new SocketsHttpHandler() { EnableMultipleHttp2Connections = true },
         });
         _client = new PredictionService.PredictionServiceClient(_channel);
         _host = host;
