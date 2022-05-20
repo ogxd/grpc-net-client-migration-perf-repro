@@ -26,7 +26,10 @@ public sealed class MyClientGrpcNetClient : IMyClient
     {
         try
         {
+            Stopwatch sw = Stopwatch.StartNew();
             var response = await _client.PredictAsync(request);
+            sw.Stop();
+            response?.SetElapsed(sw.Elapsed);
             return response;
         }
         catch (Exception e)

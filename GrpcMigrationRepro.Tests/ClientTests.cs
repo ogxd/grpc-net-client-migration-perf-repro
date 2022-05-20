@@ -7,6 +7,7 @@ using Tensorflow.Serving;
 using Xunit;
 using Xunit.Abstractions;
 using GrpcMigrationRepro.Builders;
+using System.Threading;
 
 namespace GrpcMigrationRepro.Tests;
 
@@ -27,9 +28,12 @@ public class MyClientTests
         using LocalPredictionServer server = new LocalPredictionServer(8500, Policy.NoOpAsync<PredictResponse>());
         using MyClientGrpcNetClient client = new MyClientGrpcNetClient($"127.0.0.1:{server.Port}");
 
-        TestReport report = Test(server, client, 20_000, 100_000);
-
-        Assert.Equal(1, report.successRatio);
+        var threadStart = new ThreadStart(() => Test(server, client, 20_000, 100_000));
+        Thread thread = new Thread(threadStart);
+        thread.Name = "Invoker";
+        thread.Priority = ThreadPriority.Highest;
+        thread.Start();
+        thread.Join();
     }
 
     [Fact]
@@ -38,9 +42,12 @@ public class MyClientTests
         using LocalPredictionServer server = new LocalPredictionServer(8500, Policy.NoOpAsync<PredictResponse>());
         using MyClientGrpcCore client = new MyClientGrpcCore($"127.0.0.1:{server.Port}");
 
-        TestReport report = Test(server, client, 20_000, 100_000);
-
-        Assert.Equal(1, report.successRatio);
+        var threadStart = new ThreadStart(() => Test(server, client, 20_000, 100_000));
+        Thread thread = new Thread(threadStart);
+        thread.Name = "Invoker";
+        thread.Priority = ThreadPriority.Highest;
+        thread.Start();
+        thread.Join();
     }
 
     private TestReport Test(
@@ -49,31 +56,40 @@ public class MyClientTests
         int targetQps,
         int iterations)
     {
+        var tasks = new Task<PredictResponse>[iterations];
         TimeSpan[] responseTimes = new TimeSpan[iterations];
-
-        TimeSpan targetResponseTime = TimeSpan.FromMilliseconds(1000d / targetQps);
 
         Stopwatch swTotal = Stopwatch.StartNew();
 
-        Task.WhenAll(Enumerable.Range(0, iterations)
-            .Select(async i =>
+        for (int i = 0; i < iterations;)
+        {
+            // Find out how many calls must be issued since that loop iteration, given the requested rate and the time elapsed
+            int calls = (int)(swTotal.Elapsed.TotalSeconds * targetQps) - i;
+            // Clamp so that we don't make more calls than the number of requested iterations
+            calls = Math.Clamp(calls, 0, iterations - i);
+            for (int j = 0; j < calls; j++)
             {
-                try
-                {
-                    await Task.Delay(i * targetResponseTime);
-                    Stopwatch sw = Stopwatch.StartNew();
-                    var result = await client.PredictAsync(CreateRandomRequest());
-                    sw.Stop();
-                    responseTimes[i] = (result == null) ? TimeSpan.Zero : sw.Elapsed;
-                }
-                catch (Exception ex)
-                {
-                    _output.WriteLine("Error : " + ex);
-                }
-            }))
-            .Wait();
+                tasks[i + j] = client.PredictAsync(CreateRandomRequest());
+            }
+            i += calls;
+            // Will monopolize a thread but at least we're not starting all tasks simultaneously
+            Thread.SpinWait(10);
+        }
+
+        Task.WaitAll(tasks);
+
+        //var tasks = Enumerable.Range(0, iterations)
+        //    .TakeWhile(i => swTotal.Elapsed.TotalSeconds * targetQps > i)
+        //    .Select(i => client.PredictAsync(CreateRandomRequest()));
+
+        //var endedTasks = Task.WhenAll(tasks).Result;
 
         swTotal.Stop();
+
+        for (int i = 0; i < tasks.Length; i++)
+        {
+            responseTimes[i] = tasks[i]?.Result?.GetElapsed() ?? TimeSpan.Zero;
+        }
 
         responseTimes = responseTimes.Where(x => x != TimeSpan.Zero).ToArray();
 
