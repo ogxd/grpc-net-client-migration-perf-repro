@@ -2,11 +2,15 @@ using Polly;
 using System;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime;
+using System.Threading;
 using System.Threading.Tasks;
 using Tensorflow.Serving;
 using Xunit;
 using Xunit.Abstractions;
 using GrpcMigrationRepro.Builders;
+using Polly.Contrib.Simmy;
+using Polly.Contrib.Simmy.Latency;
 
 namespace GrpcMigrationRepro.Tests;
 
@@ -22,32 +26,41 @@ public class MyClientTests
     }
 
     [Fact]
-    public void Test_Grpc_Net_Client()
+    public void Is_Server_GC()
+    {
+        Assert.True(GCSettings.IsServerGC);
+    }
+
+    [Theory]
+    [InlineData(200)]
+    [InlineData(10)]
+    public void Test_Grpc_Net_Client(int timeoutMs)
     {
         using LocalPredictionServer server = new LocalPredictionServer(8500, Policy.NoOpAsync<PredictResponse>());
+        //using LocalPredictionServer server = new LocalPredictionServer(8500, MonkeyPolicy.InjectLatencyAsync<PredictResponse>(with => with.Latency(TimeSpan.FromSeconds(5)).InjectionRate(0.01).Enabled()));
         using MyClientGrpcNetClient client = new MyClientGrpcNetClient($"127.0.0.1:{server.Port}");
 
-        TestReport report = Test(server, client, 20_000, 100_000);
-
-        Assert.Equal(1, report.successRatio);
+        Test(server, client, 10_000, 50_000, timeoutMs);
     }
 
-    [Fact]
-    public void Test_Grpc_Core()
+    [Theory]
+    [InlineData(200)]
+    [InlineData(10)]
+    public void Test_Grpc_Core(int timeoutMs)
     {
         using LocalPredictionServer server = new LocalPredictionServer(8500, Policy.NoOpAsync<PredictResponse>());
+        //using LocalPredictionServer server = new LocalPredictionServer(8500, MonkeyPolicy.InjectLatencyAsync<PredictResponse>(with => with.Latency(TimeSpan.FromSeconds(5)).InjectionRate(0.01).Enabled()));
         using MyClientGrpcCore client = new MyClientGrpcCore($"127.0.0.1:{server.Port}");
 
-        TestReport report = Test(server, client, 20_000, 100_000);
-
-        Assert.Equal(1, report.successRatio);
+        Test(server, client, 10_000, 50_000, timeoutMs);
     }
 
-    private TestReport Test(
+    private void Test(
         LocalPredictionServer server,
         IMyClient client,
         int targetQps,
-        int iterations)
+        int iterations,
+        int timeoutMs)
     {
         TimeSpan[] responseTimes = new TimeSpan[iterations];
 
@@ -62,13 +75,14 @@ public class MyClientTests
                 {
                     await Task.Delay(i * targetResponseTime);
                     Stopwatch sw = Stopwatch.StartNew();
-                    var result = await client.PredictAsync(CreateRandomRequest());
+                    var ct = new CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs));
+                    var result = await client.PredictAsync(CreateRandomRequest(), ct.Token);
                     sw.Stop();
                     responseTimes[i] = (result == null) ? TimeSpan.Zero : sw.Elapsed;
                 }
                 catch (Exception ex)
                 {
-                    _output.WriteLine("Error : " + ex);
+                    //_output.WriteLine("Error : " + ex);
                 }
             }))
             .Wait();
@@ -79,25 +93,21 @@ public class MyClientTests
 
         Array.Sort(responseTimes);
 
-        TestReport report = new TestReport();
-
-        if (responseTimes.Length > 0)
-        {
-            report.quantile95p = responseTimes[(int)(0.95d * responseTimes.Length)];
-            report.quantile50p = responseTimes[(int)(0.50d * responseTimes.Length)];
-            report.average = TimeSpan.FromTicks((long)responseTimes.Average(x => x.Ticks));
-        }
-        report.successRatio = 1d * responseTimes.Length / iterations;
-
         _output.WriteLine($"Server on {server.Port} answered {server.Successes} times");
         _output.WriteLine($"- Average QPS = {Math.Round(iterations / swTotal.Elapsed.TotalSeconds)} calls / s");
 
-        _output.WriteLine($"- Success rate = {Math.Round(100d * report.successRatio, 2)} %");
-        _output.WriteLine($"- 95p quantile = {report.quantile95p.TotalMilliseconds} ms");
-        _output.WriteLine($"- 50p quantile = {report.quantile50p.TotalMilliseconds} ms");
-        _output.WriteLine($"- Average = {report.average.TotalMilliseconds} ms");
-
-        return report;
+        if (responseTimes.Length > 0)
+        {
+            _output.WriteLine($"- Success rate = {Math.Round(100d * responseTimes.Length / iterations, 2)} %");
+            _output.WriteLine($"- Slowest request = {responseTimes[^1].TotalMilliseconds} ms");
+            _output.WriteLine($"- 95p quantile = {responseTimes[(int)(0.95d * responseTimes.Length)].TotalMilliseconds} ms");
+            _output.WriteLine($"- 50p quantile = {responseTimes[(int)(0.50d * responseTimes.Length)].TotalMilliseconds} ms");
+            _output.WriteLine($"- Average = {TimeSpan.FromTicks((long)responseTimes.Average(x => x.Ticks)).TotalMilliseconds} ms");
+        }
+        else
+        {
+            _output.WriteLine($"- Success rate = 0 %");
+        }
     }
 
     private PredictRequest CreateRandomRequest()
@@ -117,13 +127,5 @@ public class MyClientTests
                 .WithDimensions(new[] { 1 })
                 .WithDtDoubleValues(_random.NextDouble()))
             .Build();
-    }
-
-    public struct TestReport
-    {
-        public TimeSpan quantile95p;
-        public TimeSpan quantile50p;
-        public TimeSpan average;
-        public double successRatio;
     }
 }

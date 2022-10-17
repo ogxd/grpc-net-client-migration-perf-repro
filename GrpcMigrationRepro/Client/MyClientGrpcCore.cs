@@ -1,6 +1,7 @@
 using Grpc.Core;
 using System;
 using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using Tensorflow.Serving;
 
@@ -21,11 +22,11 @@ public sealed class MyClientGrpcCore : IMyClient
         _host = host;
     }
 
-    public async Task<PredictResponse> PredictAsync(PredictRequest request)
+    public async Task<PredictResponse> PredictAsync(PredictRequest request, CancellationToken cancellationToken)
     {
         try
         {
-            var response = await _client.PredictAsync(request);
+            var response = await _client.PredictAsync(request, new CallOptions().WithCancellationToken(cancellationToken));
             return response;
         }
         catch (Exception e)
