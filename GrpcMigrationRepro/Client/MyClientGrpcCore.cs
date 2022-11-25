@@ -22,11 +22,11 @@ public sealed class MyClientGrpcCore : IMyClient
         _host = host;
     }
 
-    public async Task<PredictResponse> PredictAsync(PredictRequest request, CancellationToken cancellationToken)
+    public async Task<PredictResponse> PredictAsync(PredictRequest request, int timeoutMs)
     {
         try
         {
-            var response = await _client.PredictAsync(request, new CallOptions().WithCancellationToken(cancellationToken));
+            var response = await _client.PredictAsync(request, new CallOptions().WithDeadline(DateTime.UtcNow.AddMilliseconds(timeoutMs)));
             return response;
         }
         catch (Exception e)

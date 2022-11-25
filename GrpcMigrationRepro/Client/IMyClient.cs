@@ -7,5 +7,5 @@ namespace GrpcMigrationRepro;
 
 public interface IMyClient : IDisposable
 {
-    Task<PredictResponse> PredictAsync(PredictRequest request, CancellationToken cancellationToken);
+    Task<PredictResponse> PredictAsync(PredictRequest request, int timeoutMs);
 }

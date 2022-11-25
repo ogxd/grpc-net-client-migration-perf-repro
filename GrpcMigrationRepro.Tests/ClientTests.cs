@@ -33,6 +33,7 @@ public class MyClientTests
 
     [Theory]
     [InlineData(200)]
+    [InlineData(30)]
     [InlineData(10)]
     public void Test_Grpc_Net_Client(int timeoutMs)
     {
@@ -45,6 +46,7 @@ public class MyClientTests
 
     [Theory]
     [InlineData(200)]
+    [InlineData(20)]
     [InlineData(10)]
     public void Test_Grpc_Core(int timeoutMs)
     {
@@ -68,6 +70,14 @@ public class MyClientTests
 
         Stopwatch swTotal = Stopwatch.StartNew();
 
+        // Warmup
+        // if (client is MyClientGrpcNetClient c)
+        // {
+        //     c.Channel.ConnectAsync(CancellationToken.None).Wait();
+        //     c.Channel.
+        //     client.PredictAsync(CreateRandomRequest(), CancellationToken.None).Wait();
+        // }
+
         Task.WhenAll(Enumerable.Range(0, iterations)
             .Select(async i =>
             {
@@ -75,8 +85,8 @@ public class MyClientTests
                 {
                     await Task.Delay(i * targetResponseTime);
                     Stopwatch sw = Stopwatch.StartNew();
-                    var ct = new CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs));
-                    var result = await client.PredictAsync(CreateRandomRequest(), ct.Token);
+                    // var ct = new CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs));
+                    var result = await client.PredictAsync(CreateRandomRequest(), timeoutMs);
                     sw.Stop();
                     responseTimes[i] = (result == null) ? TimeSpan.Zero : sw.Elapsed;
                 }
@@ -93,7 +103,7 @@ public class MyClientTests
 
         Array.Sort(responseTimes);
 
-        _output.WriteLine($"Server on {server.Port} answered {server.Successes} times");
+        _output.WriteLine($"Server on’ {server.Port} answered {server.Successes} times");
         _output.WriteLine($"- Average QPS = {Math.Round(iterations / swTotal.Elapsed.TotalSeconds)} calls / s");
 
         if (responseTimes.Length > 0)
