@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
-using System.Security.Authentication;
 using System.Threading;
 using System.Threading.Tasks;
 using Tensorflow.Serving;
@@ -20,40 +19,24 @@ public sealed class MyClientGrpcNetClient : IMyClient
 
     public string Host => _host;
 
-    public MyClientGrpcNetClient(string host)
+    public MyClientGrpcNetClient(string host, Action<SocketsHttpHandler> configureHandler = null)
     {
+        SocketsHttpHandler handler = new();
+        
         GrpcChannelOptions x = new GrpcChannelOptions();
         x.Credentials = ChannelCredentials.Insecure;
-        x.HttpHandler = CreateHandler();
+        
+        if (configureHandler != null)
+        {
+            x.HttpHandler = handler;
+        }
         
         _channel = GrpcChannel.ForAddress("http://" + host, x);
         _client = new PredictionService.PredictionServiceClient(_channel);
         _host = host;
-    }
-
-    private HttpMessageHandler CreateHandler()
-    {
-        return new SocketsHttpHandler()
-        {
-            ConnectCallback = async (ctx, ct) =>
-            {
-                var s = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
-                try
-                {
-                    s.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
-                    s.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 3600);
-                    s.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, 5);
-                    s.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 5);
-                    await s.ConnectAsync(ctx.DnsEndPoint, ct);
-                    return new NetworkStream(s, ownsSocket: true);
-                }
-                catch
-                {
-                    s.Dispose();
-                    throw;
-                }
-            }
-        };
+        
+        // Configure after GrpcChannel initialized or there is an error ???
+        configureHandler?.Invoke(handler);
     }
 
     public GrpcChannel Channel => _channel;

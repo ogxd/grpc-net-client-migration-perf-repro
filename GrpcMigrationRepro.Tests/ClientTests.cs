@@ -1,60 +1,69 @@
-using Polly;
 using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime;
-using System.Threading;
 using System.Threading.Tasks;
 using Tensorflow.Serving;
-using Xunit;
-using Xunit.Abstractions;
 using GrpcMigrationRepro.Builders;
+using NUnit.Framework;
+using Polly;
 using Polly.Contrib.Simmy;
 using Polly.Contrib.Simmy.Latency;
 
 namespace GrpcMigrationRepro.Tests;
 
+public enum ClientLib
+{
+    GrpcCore,
+    GrpcNetClient
+}
+
 public class MyClientTests
 {
-    private Random _random;
-    private readonly ITestOutputHelper _output;
+    private readonly Random _random= new();
 
-    public MyClientTests(ITestOutputHelper output)
-    {
-        _random = new Random();
-        _output = output;
-    }
-
-    [Fact]
+    [Test]
     public void Is_Server_GC()
     {
         Assert.True(GCSettings.IsServerGC);
     }
 
-    [Theory]
-    [InlineData(200)]
-    [InlineData(30)]
-    [InlineData(10)]
-    public void Test_Grpc_Net_Client(int timeoutMs)
+    private IMyClient CreateClientLib(ClientLib clientLib, int port) => clientLib switch
     {
-        using LocalPredictionServer server = new LocalPredictionServer(8500, Policy.NoOpAsync<PredictResponse>());
-        //using LocalPredictionServer server = new LocalPredictionServer(8500, MonkeyPolicy.InjectLatencyAsync<PredictResponse>(with => with.Latency(TimeSpan.FromSeconds(5)).InjectionRate(0.01).Enabled()));
-        using MyClientGrpcNetClient client = new MyClientGrpcNetClient($"127.0.0.1:{server.Port}");
+        ClientLib.GrpcCore => new MyClientGrpcCore($"127.0.0.1:{port}"),
+        ClientLib.GrpcNetClient => new MyClientGrpcNetClient($"127.0.0.1:{port}", GrpcNetClientCustomHandler.BypassToken),
+    };
 
-        Test(server, client, 10_000, 50_000, timeoutMs);
+    [Test]
+    public void Benchmark_Latency([Values(200)] int timeoutMs, [Values] ClientLib clientLib)
+    {
+        using LocalPredictionServer server = new LocalPredictionServer(8500, MonkeyPolicy.InjectLatencyAsync<PredictResponse>(with => with.Latency(TimeSpan.FromSeconds(5)).InjectionRate(0.01).Enabled()));
+        using IMyClient client = CreateClientLib(clientLib, server.Port);
+        Test(server, client, 5_000, 50_000, timeoutMs);
     }
-
-    [Theory]
-    [InlineData(200)]
-    [InlineData(20)]
-    [InlineData(10)]
-    public void Test_Grpc_Core(int timeoutMs)
+    
+    [Test]
+    public void Benchmark_Small_Timeout([Values(20)] int timeoutMs, [Values] ClientLib clientLib)
     {
         using LocalPredictionServer server = new LocalPredictionServer(8500, Policy.NoOpAsync<PredictResponse>());
-        //using LocalPredictionServer server = new LocalPredictionServer(8500, MonkeyPolicy.InjectLatencyAsync<PredictResponse>(with => with.Latency(TimeSpan.FromSeconds(5)).InjectionRate(0.01).Enabled()));
-        using MyClientGrpcCore client = new MyClientGrpcCore($"127.0.0.1:{server.Port}");
-
-        Test(server, client, 10_000, 50_000, timeoutMs);
+        using IMyClient client = CreateClientLib(clientLib, server.Port);
+        Test(server, client, 5_000, 50_000, timeoutMs);
+    }
+    
+    [Test]
+    public void Benchmark_High_QPS([Values(200)] int timeoutMs, [Values] ClientLib clientLib)
+    {
+        using LocalPredictionServer server = new LocalPredictionServer(8500, Policy.NoOpAsync<PredictResponse>());
+        using IMyClient client = CreateClientLib(clientLib, server.Port);
+        Test(server, client, 20_000, 100_000, timeoutMs);
+    }
+    
+    [Test]
+    public void Benchmark_Ultrahigh_QPS([Values(200)] int timeoutMs, [Values] ClientLib clientLib)
+    {
+        using LocalPredictionServer server = new LocalPredictionServer(8500, Policy.NoOpAsync<PredictResponse>());
+        using IMyClient client = CreateClientLib(clientLib, server.Port);
+        Test(server, client, 50_000, 200_000, timeoutMs);
     }
 
     private void Test(
@@ -103,20 +112,21 @@ public class MyClientTests
 
         Array.Sort(responseTimes);
 
-        _output.WriteLine($"Server on’ {server.Port} answered {server.Successes} times");
-        _output.WriteLine($"- Average QPS = {Math.Round(iterations / swTotal.Elapsed.TotalSeconds)} calls / s");
+        Console.WriteLine($"Server on’ {server.Port} answered {server.Successes} times");
+        Console.WriteLine($"- Average QPS = {Math.Round(iterations / swTotal.Elapsed.TotalSeconds)} calls / s");
 
         if (responseTimes.Length > 0)
         {
-            _output.WriteLine($"- Success rate = {Math.Round(100d * responseTimes.Length / iterations, 2)} %");
-            _output.WriteLine($"- Slowest request = {responseTimes[^1].TotalMilliseconds} ms");
-            _output.WriteLine($"- 95p quantile = {responseTimes[(int)(0.95d * responseTimes.Length)].TotalMilliseconds} ms");
-            _output.WriteLine($"- 50p quantile = {responseTimes[(int)(0.50d * responseTimes.Length)].TotalMilliseconds} ms");
-            _output.WriteLine($"- Average = {TimeSpan.FromTicks((long)responseTimes.Average(x => x.Ticks)).TotalMilliseconds} ms");
+            Console.WriteLine($"- Success rate = {Math.Round(100d * responseTimes.Length / iterations, 2)} %");
+            Console.WriteLine($"- Slowest request = {responseTimes[^1].TotalMilliseconds} ms");
+            Console.WriteLine($"- 99p quantile = {responseTimes[(int)(0.99d * responseTimes.Length)].TotalMilliseconds} ms");
+            Console.WriteLine($"- 95p quantile = {responseTimes[(int)(0.95d * responseTimes.Length)].TotalMilliseconds} ms");
+            Console.WriteLine($"- 50p quantile = {responseTimes[(int)(0.50d * responseTimes.Length)].TotalMilliseconds} ms");
+            Console.WriteLine($"- Average = {TimeSpan.FromTicks((long)responseTimes.Average(x => x.Ticks)).TotalMilliseconds} ms");
         }
         else
         {
-            _output.WriteLine($"- Success rate = 0 %");
+            Console.WriteLine($"- Success rate = 0 %");
         }
     }
 
