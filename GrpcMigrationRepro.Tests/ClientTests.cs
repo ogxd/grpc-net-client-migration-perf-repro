@@ -78,24 +78,62 @@ public class MyClientTests
         //     client.PredictAsync(CreateRandomRequest(), CancellationToken.None).Wait();
         // }
 
-        Task.WhenAll(Enumerable.Range(0, iterations)
-            .Select(async i =>
+        Task.Run(async () =>
+        {
+            var tasks = new List<Task>();
+            var stopwatch = Stopwatch.StartNew();
+            for (int i = 0; i < iterations;)
             {
-                try
+                double expectedSeconds = 1d * i / targetQps;
+
+                double lateSeconds = stopwatch.Elapsed.TotalSeconds - expectedSeconds;
+
+                int iterationsForStep = (int)Math.Round(lateSeconds * targetQps);
+
+                for (int k = 0; k < iterationsForStep; k++)
                 {
-                    await Task.Delay(i * targetResponseTime);
-                    Stopwatch sw = Stopwatch.StartNew();
-                    // var ct = new CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs));
-                    var result = await client.PredictAsync(CreateRandomRequest(), timeoutMs);
-                    sw.Stop();
-                    responseTimes[i] = (result == null) ? TimeSpan.Zero : sw.Elapsed;
+                    int iteration = i + k;
+                    tasks.Add(Task.Run(async () =>
+                    {
+                        try
+                        {
+                            Stopwatch sw = Stopwatch.StartNew();
+                            var result = await client.PredictAsync(CreateRandomRequest(), timeoutMs);
+                            sw.Stop();
+                            responseTimes[iteration] = (result == null) ? TimeSpan.Zero : sw.Elapsed;
+                        }
+                        catch (Exception ex)
+                        {
+                            //_output.WriteLine("Error : " + ex);
+                        }
+                    }));
                 }
-                catch (Exception ex)
-                {
-                    //_output.WriteLine("Error : " + ex);
-                }
-            }))
-            .Wait();
+
+                i += iterationsForStep;
+
+                await Task.Delay(15);
+            }
+
+            await Task.WhenAll(tasks);
+        }).Wait();
+
+        // Task.WhenAll(Enumerable.Range(0, iterations)
+        //     .Select(async i =>
+        //     {
+        //         try
+        //         {
+        //             await Task.Delay(i * targetResponseTime);
+        //             Stopwatch sw = Stopwatch.StartNew();
+        //             var result = await client.PredictAsync(CreateRandomRequest(), timeoutMs);
+        //             sw.Stop();
+        //             responseTimes[i] = (result == null) ? TimeSpan.Zero : sw.Elapsed;
+        //         }
+        //         catch (Exception ex)
+        //         {
+        //             //_output.WriteLine("Error : " + ex);
+        //         }
+        //     }))
+        //     .Wait();
 
         swTotal.Stop();
 
