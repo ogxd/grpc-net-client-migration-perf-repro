@@ -2,13 +2,16 @@ using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime;
+using System.Threading;
 using System.Threading.Tasks;
 using Tensorflow.Serving;
 using GrpcMigrationRepro.Builders;
+using Microsoft.Diagnostics.Tracing.Parsers.Clr;
 using NUnit.Framework;
 using Polly;
 using Polly.Contrib.Simmy;
 using Polly.Contrib.Simmy.Latency;
+using Smart.Monitoring;
 
 namespace GrpcMigrationRepro.Tests;
 
@@ -20,7 +23,7 @@ public enum ClientLib
 
 public class MyClientTests
 {
-    private readonly Random _random= new();
+    private readonly Random _random = new();
 
     [Test]
     public void Is_Server_GC()
@@ -31,7 +34,8 @@ public class MyClientTests
     private IMyClient CreateClientLib(ClientLib clientLib, int port) => clientLib switch
     {
         ClientLib.GrpcCore => new MyClientGrpcCore($"127.0.0.1:{port}"),
-        ClientLib.GrpcNetClient => new MyClientGrpcNetClient($"127.0.0.1:{port}", GrpcNetClientCustomHandler.BypassToken),
+        ClientLib.GrpcNetClient => new MyClientGrpcNetClient($"127.0.0.1:{port}", GrpcNetClientCustomHandler.InterNetwork),
+        //ClientLib.GrpcNetClient => new MyClientGrpcNetClient($"127.0.0.11:{port}"),
     };
 
     [Test]
@@ -39,7 +43,7 @@ public class MyClientTests
     {
         using LocalPredictionServer server = new LocalPredictionServer(8500, MonkeyPolicy.InjectLatencyAsync<PredictResponse>(with => with.Latency(TimeSpan.FromSeconds(5)).InjectionRate(0.01).Enabled()));
         using IMyClient client = CreateClientLib(clientLib, server.Port);
-        Test(server, client, 5_000, 50_000, timeoutMs);
+        Test(server, client, 15_000, 50_000, timeoutMs);
     }
     
     [Test]
@@ -55,7 +59,8 @@ public class MyClientTests
     {
         using LocalPredictionServer server = new LocalPredictionServer(8500, Policy.NoOpAsync<PredictResponse>());
         using IMyClient client = CreateClientLib(clientLib, server.Port);
-        Test(server, client, 20_000, 100_000, timeoutMs);
+        int qps = 20000;
+        Test(server, client, qps, 5 * qps, timeoutMs);
     }
     
     [Test]
@@ -73,7 +78,33 @@ public class MyClientTests
         int iterations,
         int timeoutMs)
     {
-        TimeSpan[] responseTimes = new TimeSpan[iterations];
+        ExceptionMonitor exceptionMonitor = new();
+        //MemoryMonitor memoryMonitor = new();
+        
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            exceptionMonitor.Start();
+        });
+        //
+        // ThreadPool.QueueUserWorkItem(_ =>
+        // {
+        //     memoryMonitor.Start();
+        // });
+       
+        
+        // ThreadPool.QueueUserWorkItem(_ =>
+        // {
+        //     Thread.Sleep(5000);
+        //     server.Dispose();
+        //     Console.WriteLine("Server stopped");
+        //     Thread.Sleep(5000);
+        //     server.Start();
+        //     Console.WriteLine("Server restarted");
+        // });
+        
+        Thread.Sleep(500);
+
+        Result[] results = new Result[iterations];
 
         TimeSpan targetResponseTime = TimeSpan.FromMilliseconds(1000d / targetQps);
 
@@ -90,44 +121,58 @@ public class MyClientTests
         Task.WhenAll(Enumerable.Range(0, iterations)
             .Select(async i =>
             {
+                await Task.Delay(i * targetResponseTime);
+
+                if (30 * i % iterations == 0)
+                {
+                    //Console.WriteLine($"Exceptions thrown: {exceptionMonitor.ExceptionCount}");
+                    //GC.Collect();
+                    //var gcinfo = GC.GetGCMemoryInfo(GCKind.FullBlocking);
+                    //Console.WriteLine($"Heap Size: {0.001 * 0.001 * gcinfo.HeapSizeBytes}mb");
+                    //Console.WriteLine($"Gen0: {0.001 * 0.001 * memoryMonitor.GetGenerationSize(0)}mb, Gen1: {0.001 * 0.001 * memoryMonitor.GetGenerationSize(1)}mb, Gen2: {0.001 * 0.001 * memoryMonitor.GetGenerationSize(2)}mb, Gen3: {0.001 * 0.001 * memoryMonitor.GetGenerationSize(3)}mb");
+                }
+                
+                var status = CallStatus.Null;
+                Stopwatch sw = Stopwatch.StartNew();
                 try
                 {
-                    await Task.Delay(i * targetResponseTime);
-                    Stopwatch sw = Stopwatch.StartNew();
                     // var ct = new CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs));
                     var result = await client.PredictAsync(CreateRandomRequest(), timeoutMs);
-                    sw.Stop();
-                    responseTimes[i] = (result == null) ? TimeSpan.Zero : sw.Elapsed;
+                    if (result != null)
+                        status = CallStatus.Ok;
                 }
                 catch (Exception ex)
                 {
-                    //_output.WriteLine("Error : " + ex);
+                    status = CallStatus.Exception;
                 }
+                sw.Stop();
+                results[i] = new Result(sw.Elapsed, status);
             }))
             .Wait();
 
         swTotal.Stop();
 
-        responseTimes = responseTimes.Where(x => x != TimeSpan.Zero).ToArray();
-
-        Array.Sort(responseTimes);
+        results = results.OrderBy(x => x.ResponseTime).ToArray();
 
         Console.WriteLine($"Server on’ {server.Port} answered {server.Successes} times");
         Console.WriteLine($"- Average QPS = {Math.Round(iterations / swTotal.Elapsed.TotalSeconds)} calls / s");
 
-        if (responseTimes.Length > 0)
-        {
-            Console.WriteLine($"- Success rate = {Math.Round(100d * responseTimes.Length / iterations, 2)} %");
-            Console.WriteLine($"- Slowest request = {responseTimes[^1].TotalMilliseconds} ms");
-            Console.WriteLine($"- 99p quantile = {responseTimes[(int)(0.99d * responseTimes.Length)].TotalMilliseconds} ms");
-            Console.WriteLine($"- 95p quantile = {responseTimes[(int)(0.95d * responseTimes.Length)].TotalMilliseconds} ms");
-            Console.WriteLine($"- 50p quantile = {responseTimes[(int)(0.50d * responseTimes.Length)].TotalMilliseconds} ms");
-            Console.WriteLine($"- Average = {TimeSpan.FromTicks((long)responseTimes.Average(x => x.Ticks)).TotalMilliseconds} ms");
-        }
-        else
-        {
-            Console.WriteLine($"- Success rate = 0 %");
-        }
+        Console.WriteLine($"- Success rate = {Math.Round(100d * results.Count(x => x.CallStatus == CallStatus.Ok) / iterations, 2)} %");
+        Console.WriteLine($"- Exception rate = {Math.Round(100d * results.Count(x => x.CallStatus == CallStatus.Exception) / iterations, 2)} %");
+        Console.WriteLine($"- Slowest request = {results[^1].ResponseTime.TotalMilliseconds} ms");
+        Console.WriteLine($"- 99p quantile = {results[(int)(0.99d * results.Length)].ResponseTime.TotalMilliseconds} ms");
+        Console.WriteLine($"- 95p quantile = {results[(int)(0.95d * results.Length)].ResponseTime.TotalMilliseconds} ms");
+        Console.WriteLine($"- 50p quantile = {results[(int)(0.50d * results.Length)].ResponseTime.TotalMilliseconds} ms");
+        Console.WriteLine($"- Average = {TimeSpan.FromTicks((long)results.Select(x => x.ResponseTime).Average(x => x.Ticks)).TotalMilliseconds} ms");
+    }
+
+    public record struct Result(TimeSpan ResponseTime, CallStatus CallStatus);
+    
+    public enum  CallStatus
+    {
+        Ok,
+        Null,
+        Exception,
     }
 
     private PredictRequest CreateRandomRequest()

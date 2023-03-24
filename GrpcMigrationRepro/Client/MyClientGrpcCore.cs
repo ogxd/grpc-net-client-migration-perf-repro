@@ -1,7 +1,6 @@
 using Grpc.Core;
 using System;
 using System.Diagnostics;
-using System.Threading;
 using System.Threading.Tasks;
 using Tensorflow.Serving;
 
@@ -24,17 +23,8 @@ public sealed class MyClientGrpcCore : IMyClient
 
     public async Task<PredictResponse> PredictAsync(PredictRequest request, int timeoutMs)
     {
-        try
-        {
-            var response = await _client.PredictAsync(request, new CallOptions().WithDeadline(DateTime.UtcNow.AddMilliseconds(timeoutMs)));
-            return response;
-        }
-        catch (Exception e)
-        {
-
-        }
-
-        return null;
+        var response = await _client.PredictAsync(request, new CallOptions().WithDeadline(DateTime.UtcNow.AddMilliseconds(timeoutMs)));
+        return response;
     }
 
     public void Dispose()

@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace GrpcMigrationRepro;
 
@@ -12,7 +13,15 @@ public static class GrpcNetClientCustomHandler
     {
         int connectionCount = 0;
         IPAddress ip = null;
-            
+
+        handler.EnableMultipleHttp2Connections = true;
+        handler.MaxConnectionsPerServer = 100;
+        handler.PooledConnectionLifetime = TimeSpan.FromHours(1);
+        handler.AutomaticDecompression = DecompressionMethods.None;
+        handler.UseProxy = false;
+        handler.UseCookies = false;
+        handler.InitialHttp2StreamWindowSize = 16777216;
+        
         handler.ConnectCallback = async (context, token) =>
         {
             int connectionsCreated = Interlocked.Increment(ref connectionCount);
@@ -21,8 +30,15 @@ public static class GrpcNetClientCustomHandler
             var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)
             {
                 LingerState = new LingerOption(true, 0),
-                NoDelay = true
+                NoDelay = true,
             };
+
+            // var task = Task.Run(async () =>
+            // {
+            //     await Task.Delay(1000);
+            //     Console.WriteLine("Close socket");
+            //     socket.Shutdown(SocketShutdown.Receive);
+            // });
             
             if (ip == null)
             {
@@ -32,6 +48,12 @@ public static class GrpcNetClientCustomHandler
 
             try
             {
+                //socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Linger, 0);
+                socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+                socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 5);
+                socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, 5);
+                socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 5);
+                
                 await socket.ConnectAsync(ip, context.DnsEndPoint.Port, token).ConfigureAwait(false);
                 return new NetworkStream(socket, ownsSocket: true);
             }

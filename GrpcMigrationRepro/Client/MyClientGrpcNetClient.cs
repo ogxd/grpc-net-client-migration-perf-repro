@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Tensorflow.Serving;
 using Grpc.Net.Client;
+using Grpc.Net.Client.Configuration;
 
 namespace GrpcMigrationRepro;
 
@@ -43,18 +44,9 @@ public sealed class MyClientGrpcNetClient : IMyClient
     
     public async Task<PredictResponse> PredictAsync(PredictRequest request, int timeoutMs)
     {
-        try
-        {
-            //var response = await _client.PredictAsync(request, new CallOptions().WithCancellationToken(new CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs)).Token));
-            var response = await _client.PredictAsync(request, new CallOptions().WithDeadline(DateTime.UtcNow.AddMilliseconds(timeoutMs)));
-            return response;
-        }
-        catch (Exception e)
-        {
-
-        }
-
-        return null;
+        //var response = await _client.PredictAsync(request, new CallOptions().WithCancellationToken(new CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs)).Token));
+        var response = await _client.PredictAsync(request, new CallOptions().WithDeadline(DateTime.UtcNow.AddMilliseconds(timeoutMs)));
+        return response;
     }
 
     public void Dispose()

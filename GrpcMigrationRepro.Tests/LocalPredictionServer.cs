@@ -9,8 +9,9 @@ namespace GrpcMigrationRepro.Tests;
 
 public class LocalPredictionServer : IDisposable
 {
-    private readonly Server _server;
+    private Server _server;
     private readonly int _port;
+    private readonly IAsyncPolicy<PredictResponse> _chaosPolicy;
     private int _successes;
 
     public int Port => _port;
@@ -20,10 +21,16 @@ public class LocalPredictionServer : IDisposable
     public LocalPredictionServer(int port, IAsyncPolicy<PredictResponse> chaosPolicy)
     {
         _port = port;
+        _chaosPolicy = chaosPolicy;
+        Start();
+    }
+
+    public void Start()
+    {
         _server = new Server
         {
-            Services = { PredictionService.BindService(new LocalPredictionService(this, chaosPolicy)) },
-            Ports = { new ServerPort("localhost", port, ServerCredentials.Insecure) }
+            Services = { PredictionService.BindService(new LocalPredictionService(this, _chaosPolicy)) },
+            Ports = { new ServerPort("localhost", _port, ServerCredentials.Insecure) }
         };
         _server.Start();
     }
