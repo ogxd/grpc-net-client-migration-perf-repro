@@ -34,7 +34,7 @@ public class MyClientTests
     private IMyClient CreateClientLib(ClientLib clientLib, int port) => clientLib switch
     {
         ClientLib.GrpcCore => new MyClientGrpcCore($"127.0.0.1:{port}"),
-        ClientLib.GrpcNetClient => new MyClientGrpcNetClient($"127.0.0.1:{port}", GrpcNetClientCustomHandler.InterNetwork),
+        ClientLib.GrpcNetClient => new MyClientGrpcNetClient($"127.0.0.1:{port}"/*, GrpcNetClientCustomHandler.InterNetwork*/),
         //ClientLib.GrpcNetClient => new MyClientGrpcNetClient($"127.0.0.11:{port}"),
     };
 
@@ -64,11 +64,11 @@ public class MyClientTests
     }
     
     [Test]
-    public void Benchmark_Ultrahigh_QPS([Values(200)] int timeoutMs, [Values] ClientLib clientLib)
+    public void Benchmark_Ultrahigh_QPS([Values(0)] int timeoutMs, [Values] ClientLib clientLib)
     {
         using LocalPredictionServer server = new LocalPredictionServer(8500, Policy.NoOpAsync<PredictResponse>());
         using IMyClient client = CreateClientLib(clientLib, server.Port);
-        Test(server, client, 50_000, 200_000, timeoutMs);
+        Test(server, client, 10_000, 100_000, timeoutMs);
     }
 
     private void Test(
@@ -154,11 +154,13 @@ public class MyClientTests
 
         results = results.OrderBy(x => x.ResponseTime).ToArray();
 
+        Console.WriteLine($"Exceptions thrown: {exceptionMonitor.ExceptionCount}");
         Console.WriteLine($"Server on’ {server.Port} answered {server.Successes} times");
         Console.WriteLine($"- Average QPS = {Math.Round(iterations / swTotal.Elapsed.TotalSeconds)} calls / s");
 
-        Console.WriteLine($"- Success rate = {Math.Round(100d * results.Count(x => x.CallStatus == CallStatus.Ok) / iterations, 2)} %");
-        Console.WriteLine($"- Exception rate = {Math.Round(100d * results.Count(x => x.CallStatus == CallStatus.Exception) / iterations, 2)} %");
+        Console.WriteLine($"- Success rate = {Math.Round(100d * results.Count(x => x.CallStatus == CallStatus.Ok) / iterations, 4)} %");
+        Console.WriteLine($"- Exception rate = {Math.Round(100d * results.Count(x => x.CallStatus == CallStatus.Exception) / iterations, 4)} %");
+        Console.WriteLine($"- Null rate = {Math.Round(100d * results.Count(x => x.CallStatus == CallStatus.Null) / iterations, 4)} %");
         Console.WriteLine($"- Slowest request = {results[^1].ResponseTime.TotalMilliseconds} ms");
         Console.WriteLine($"- 99p quantile = {results[(int)(0.99d * results.Length)].ResponseTime.TotalMilliseconds} ms");
         Console.WriteLine($"- 95p quantile = {results[(int)(0.95d * results.Length)].ResponseTime.TotalMilliseconds} ms");

@@ -1,14 +1,13 @@
 using Grpc.Core;
 using System;
 using System.Diagnostics;
-using System.Net;
 using System.Net.Http;
-using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using Equativ.Threading;
+using Equativ.Threading.Tasks;
 using Tensorflow.Serving;
 using Grpc.Net.Client;
-using Grpc.Net.Client.Configuration;
 
 namespace GrpcMigrationRepro;
 
@@ -42,11 +41,49 @@ public sealed class MyClientGrpcNetClient : IMyClient
 
     public GrpcChannel Channel => _channel;
     
+    public async Task<PredictResponse> PredictAsync2(PredictRequest request, int timeoutMs)
+    {
+        var pessimisticToken = CoalescingCancellationTokenProvider.Instance.GetCancellationToken(TimeSpan.FromSeconds(60));
+        AsyncUnaryCall<PredictResponse> callTask = _client.PredictAsync(request, new CallOptions(cancellationToken: pessimisticToken));
+        
+        var token = CoalescingCancellationTokenProvider.Instance.GetCancellationToken(TimeSpan.FromMilliseconds(timeoutMs));
+        var result = await callTask.ResponseAsync.ToAsyncResult(token);
+        
+        if (result.IsSuccessful)
+        {
+            return result.Value;
+        }
+
+        switch (result.Exception)
+        {
+            case OperationCanceledException operationCanceledException:
+                // Some code
+                break;
+            default:
+                // Some code
+                break;
+        }
+
+        return null;
+    }
+    
     public async Task<PredictResponse> PredictAsync(PredictRequest request, int timeoutMs)
     {
-        //var response = await _client.PredictAsync(request, new CallOptions().WithCancellationToken(new CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs)).Token));
-        var response = await _client.PredictAsync(request, new CallOptions().WithDeadline(DateTime.UtcNow.AddMilliseconds(timeoutMs)));
-        return response;
+        var token = CoalescingCancellationTokenProvider.Instance.GetCancellationToken(TimeSpan.FromMilliseconds(timeoutMs));
+        try
+        {
+            return await _client.PredictAsync(request, new CallOptions(cancellationToken: token));
+        }
+        catch (OperationCanceledException operationCanceledException)
+        {
+            // Some code
+        }
+        catch
+        {
+            // Some code
+        }
+
+        return null;
     }
 
     public void Dispose()
